@@ -13,9 +13,12 @@ func main() {
 		if idx == 0 || args == "" {
 			continue
 		}
+		if args == "-BIG5" {
+			utils.BIG5 = true
+			continue
+		}
 		parameters = append(parameters, args)
 	}
-
 	fmt.Printf("ARGS: %v %d\n", parameters, len(parameters))
 
 	// *.exe unzip /root/mcsm.zip /www

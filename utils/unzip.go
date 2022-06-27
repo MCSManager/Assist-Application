@@ -3,14 +3,18 @@ package utils
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
 	"golang.org/x/text/transform"
 )
+
+var BIG5 = false
 
 // 示例: zip.Unzip("./mcsm.zip", "./") 可使用相对路径和绝对路径
 func Unzip(zipPath string, targetPath string) error {
@@ -19,19 +23,145 @@ func Unzip(zipPath string, targetPath string) error {
 		return err
 	}
 	defer zipReader.Close()
-	var decodeName string
-	for _, f := range zipReader.File {
-		// fmt.Printf("isUtf8([]byte(f.Name)): %v\n", isUtf8([]byte(f.Name)))
-		// fmt.Printf("isGBK([]byte(f.Name)): %v\n", isGBK([]byte(f.Name)))
-		if isUtf8([]byte(f.Name)) {
-			decodeName = f.Name
-		} else if isGBK([]byte(f.Name)) {
-			i := bytes.NewReader([]byte(f.Name))
-			decoder := transform.NewReader(i, simplifiedchinese.GB18030.NewDecoder())
-			// decoder := transform.NewReader(i, traditionalchinese.Big5.NewDecoder())
-			content, _ := ioutil.ReadAll(decoder)
-			decodeName = string(content)
+	if zipEncodeIsUtf8(zipReader.File) {
+		fmt.Println("decode: utf8")
+		err = decoderUtf8(zipReader.File, targetPath)
+		if err != nil {
+			fmt.Printf("decoderUtf8 err:%v", err)
+			panic(err)
 		}
+	} else if zipEncodeIsGBK(zipReader.File) {
+		if BIG5 {
+			fmt.Println("decode: big5")
+			err = decoderBIG5(zipReader.File, targetPath)
+			if err != nil {
+				fmt.Printf("decoderUtf8 err:%v", err)
+				panic(err)
+			}
+		} else {
+			fmt.Println("decode: gbk")
+			err = decoderGBK(zipReader.File, targetPath)
+			if err != nil {
+				fmt.Printf("decoderUtf8 err:%v", err)
+				panic(err)
+			}
+		}
+	}
+	return nil
+}
+
+func zipEncodeIsUtf8(f []*zip.File) bool {
+	var i = 0
+	var count = 0
+	for _, v := range f {
+		if i == 3 {
+			break
+		}
+		if isUtf8([]byte(v.Name)) {
+			count++
+		}
+		i++
+	}
+	fmt.Printf("count: %v\n", count)
+	if count == i {
+		return true
+	} else {
+		return false
+	}
+}
+
+func zipEncodeIsGBK(f []*zip.File) bool {
+	var i = 0
+	var count = 0
+	for _, v := range f {
+		if i == 3 {
+			break
+		}
+		if isGBK([]byte(v.Name)) {
+			count++
+		}
+		i++
+	}
+	if count == i {
+		return true
+	} else {
+		return false
+	}
+}
+
+func decoderUtf8(files []*zip.File, targetPath string) error {
+	var decodeName string
+	var err error
+	for _, f := range files {
+		decodeName = f.Name
+		fpath := filepath.Join(targetPath, decodeName)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+		} else {
+			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+				return err
+			}
+			inFile, err := f.Open()
+			if err != nil {
+				return err
+			}
+			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(outFile, inFile)
+			if err != nil {
+				return err
+			}
+			inFile.Close()
+			outFile.Close()
+		}
+	}
+	return nil
+}
+
+func decoderGBK(files []*zip.File, targetPath string) error {
+	var decodeName string
+	var err error
+	for _, f := range files {
+		i := bytes.NewReader([]byte(f.Name))
+		decoder := transform.NewReader(i, simplifiedchinese.GB18030.NewDecoder())
+		content, _ := ioutil.ReadAll(decoder)
+		decodeName = string(content)
+		fpath := filepath.Join(targetPath, decodeName)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+		} else {
+			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+				return err
+			}
+			inFile, err := f.Open()
+			if err != nil {
+				return err
+			}
+			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(outFile, inFile)
+			if err != nil {
+				return err
+			}
+			inFile.Close()
+			outFile.Close()
+		}
+	}
+	return nil
+}
+
+func decoderBIG5(files []*zip.File, targetPath string) error {
+	var decodeName string
+	var err error
+	for _, f := range files {
+		i := bytes.NewReader([]byte(f.Name))
+		decoder := transform.NewReader(i, traditionalchinese.Big5.NewDecoder())
+		content, _ := ioutil.ReadAll(decoder)
+		decodeName = string(content)
 		fpath := filepath.Join(targetPath, decodeName)
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(fpath, os.ModePerm)
