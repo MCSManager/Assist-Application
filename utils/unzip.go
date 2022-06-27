@@ -23,26 +23,89 @@ func Unzip(zipPath string, targetPath string) error {
 		return err
 	}
 	defer zipReader.Close()
-	if zipEncodeIsUtf8(zipReader.File) {
+	if zipEncode(zipReader.File, isUtf8) {
 		fmt.Println("decode: utf8")
-		err = decoderUtf8(zipReader.File, targetPath)
+		err = decoder(zipReader.File, targetPath, "utf8")
 		if err != nil {
 			fmt.Printf("decoderUtf8 err:%v", err)
 			panic(err)
 		}
-	} else if zipEncodeIsGBK(zipReader.File) {
+	} else if zipEncode(zipReader.File, isGBK) {
 		if BIG5 {
 			fmt.Println("decode: big5")
-			err = decoderBIG5(zipReader.File, targetPath)
+			err = decoder(zipReader.File, targetPath, "big5")
 			if err != nil {
 				fmt.Printf("decoderUtf8 err:%v", err)
 				panic(err)
 			}
 		} else {
 			fmt.Println("decode: gbk")
-			err = decoderGBK(zipReader.File, targetPath)
+			err = decoder(zipReader.File, targetPath, "gbk")
 			if err != nil {
 				fmt.Printf("decoderUtf8 err:%v", err)
+				panic(err)
+			}
+		}
+	} else {
+		fmt.Println("unkonw decoder, use decode: utf8")
+		err = decoder(zipReader.File, targetPath, "utf8")
+		if err != nil {
+			fmt.Printf("decoderUtf8 err:%v", err)
+			panic(err)
+		}
+	}
+	return nil
+}
+
+func zipEncode(f []*zip.File, fun func(data []byte) bool) bool {
+	var i = 0
+	var count = 0
+	for _, v := range f {
+		if i == 3 {
+			break
+		}
+		if fun([]byte(v.Name)) {
+			count++
+		}
+		i++
+	}
+	// fmt.Printf("count: %v\n", count)
+	if count == i {
+		return true
+	} else {
+		return false
+	}
+}
+
+func decoder(files []*zip.File, targetPath string, types string) error {
+	var err error
+	switch types {
+	case "utf8":
+		for _, f := range files {
+			content := []byte(f.Name)
+			err = handleFile(f, &targetPath, &content)
+			if err != nil {
+				fmt.Println("handleFile utf8 err:", err)
+				panic(err)
+			}
+		}
+	case "gbk":
+		for _, f := range files {
+			decoder := transform.NewReader(bytes.NewReader([]byte(f.Name)), simplifiedchinese.GB18030.NewDecoder())
+			content, _ := ioutil.ReadAll(decoder)
+			err = handleFile(f, &targetPath, &content)
+			if err != nil {
+				fmt.Println("handleFile gbk err:", err)
+				panic(err)
+			}
+		}
+	case "big5":
+		for _, f := range files {
+			decoder := transform.NewReader(bytes.NewReader([]byte(f.Name)), traditionalchinese.Big5.NewDecoder())
+			content, _ := ioutil.ReadAll(decoder)
+			err = handleFile(f, &targetPath, &content)
+			if err != nil {
+				fmt.Println("handleFile big5 err:", err)
 				panic(err)
 			}
 		}
@@ -50,140 +113,29 @@ func Unzip(zipPath string, targetPath string) error {
 	return nil
 }
 
-func zipEncodeIsUtf8(f []*zip.File) bool {
-	var i = 0
-	var count = 0
-	for _, v := range f {
-		if i == 3 {
-			break
-		}
-		if isUtf8([]byte(v.Name)) {
-			count++
-		}
-		i++
-	}
-	fmt.Printf("count: %v\n", count)
-	if count == i {
-		return true
+func handleFile(f *zip.File, targetPath *string, decodeName *[]byte) error {
+	var err error
+	fpath := filepath.Join(*targetPath, string(*decodeName))
+	if f.FileInfo().IsDir() {
+		os.MkdirAll(fpath, os.ModePerm)
 	} else {
-		return false
-	}
-}
-
-func zipEncodeIsGBK(f []*zip.File) bool {
-	var i = 0
-	var count = 0
-	for _, v := range f {
-		if i == 3 {
-			break
+		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
 		}
-		if isGBK([]byte(v.Name)) {
-			count++
+		inFile, err := f.Open()
+		if err != nil {
+			return err
 		}
-		i++
-	}
-	if count == i {
-		return true
-	} else {
-		return false
-	}
-}
-
-func decoderUtf8(files []*zip.File, targetPath string) error {
-	var decodeName string
-	var err error
-	for _, f := range files {
-		decodeName = f.Name
-		fpath := filepath.Join(targetPath, decodeName)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
-		} else {
-			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-				return err
-			}
-			inFile, err := f.Open()
-			if err != nil {
-				return err
-			}
-			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(outFile, inFile)
-			if err != nil {
-				return err
-			}
-			inFile.Close()
-			outFile.Close()
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-func decoderGBK(files []*zip.File, targetPath string) error {
-	var decodeName string
-	var err error
-	for _, f := range files {
-		i := bytes.NewReader([]byte(f.Name))
-		decoder := transform.NewReader(i, simplifiedchinese.GB18030.NewDecoder())
-		content, _ := ioutil.ReadAll(decoder)
-		decodeName = string(content)
-		fpath := filepath.Join(targetPath, decodeName)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
-		} else {
-			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-				return err
-			}
-			inFile, err := f.Open()
-			if err != nil {
-				return err
-			}
-			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(outFile, inFile)
-			if err != nil {
-				return err
-			}
-			inFile.Close()
-			outFile.Close()
+		_, err = io.Copy(outFile, inFile)
+		if err != nil {
+			return err
 		}
-	}
-	return nil
-}
-
-func decoderBIG5(files []*zip.File, targetPath string) error {
-	var decodeName string
-	var err error
-	for _, f := range files {
-		i := bytes.NewReader([]byte(f.Name))
-		decoder := transform.NewReader(i, traditionalchinese.Big5.NewDecoder())
-		content, _ := ioutil.ReadAll(decoder)
-		decodeName = string(content)
-		fpath := filepath.Join(targetPath, decodeName)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, os.ModePerm)
-		} else {
-			if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-				return err
-			}
-			inFile, err := f.Open()
-			if err != nil {
-				return err
-			}
-			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(outFile, inFile)
-			if err != nil {
-				return err
-			}
-			inFile.Close()
-			outFile.Close()
-		}
+		inFile.Close()
+		outFile.Close()
 	}
 	return nil
 }
