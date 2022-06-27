@@ -6,6 +6,8 @@
 *.dylib
 *.zip
 
+main
+
 .idea/
 out/
 
